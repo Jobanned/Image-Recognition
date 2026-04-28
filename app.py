@@ -31,7 +31,7 @@ hand_tracker = hand_landmarker.HandLandmarker.create_from_options(
     hand_landmarker.HandLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=model_path),
         running_mode=VisionTaskRunningMode.VIDEO,
-        num_hands=1,
+        num_hands=2,
         min_hand_detection_confidence=0.7,
         min_hand_presence_confidence=0.7,
         min_tracking_confidence=0.7,
