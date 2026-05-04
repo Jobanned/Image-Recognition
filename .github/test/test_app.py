@@ -1,6 +1,5 @@
 import os
-import cv2
-import mediapipe as mp
+import pytest
 
 def test_files_exist():
     # Verify image paths from source 1
@@ -10,6 +9,7 @@ def test_files_exist():
 
 def test_model_initialization():
     # Verify the task file is valid and can be initialized by MediaPipe
+    pytest.importorskip("mediapipe")
     from mediapipe.tasks import python
     from mediapipe.tasks.python import vision
 
