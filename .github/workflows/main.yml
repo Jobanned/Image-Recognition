@@ -34,8 +34,8 @@ jobs:
 
     - name: Run Unit Tests
       run: |
-        # Assumes tests are located in a folder named 'tests' or similar
-        pytest
+        # Tests live under .github/test; pytest skips dot-directories by default
+        pytest .github/test
 
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
