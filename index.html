@@ -176,11 +176,11 @@
 						const ctx = captureCanvas.getContext('2d');
 						ctx.drawImage(camera, 0, 0, width, height);
 
-						const image = captureCanvas.toDataURL('image/jpeg', 0.6);
-						const response = await fetch('/api/analyze', {
-							method: 'POST',
-							headers: {'Content-Type': 'application/json'},
-							body: JSON.stringify({image})
+					const frame_base64 = captureCanvas.toDataURL('image/jpeg', 0.6);
+					const response = await fetch('/api/analyze', {
+						method: 'POST',
+						headers: {'Content-Type': 'application/json'},
+						body: JSON.stringify({frame_base64})
 						});
 
 						if(!response.ok){

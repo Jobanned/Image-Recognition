@@ -1,49 +1,97 @@
-# AGENTS.md
+# AGENTS.md — (Image Recognition) Repository Guide
 
-This document defines the specialized "agents" or functional units within the `jobanned/image-recognition` project[cite: 1]. Each unit is responsible for a specific stage of the pipeline, from raw data acquisition to final classification and visual feedback[cite: 1].
+Scope: This file governs the entire repository.
 
----
+Read this first if you’re contributing, reviewing, or acting as an automated coding agent.
 
-## 1. Vision Perception Agent (VPA)
-The **VPA** acts as the primary interface between the hardware (camera) and the processing logic[cite: 1]. Its goal is to ensure high-quality frames are available for analysis[cite: 1].
+## Intent & Principles
 
-*   **Primary Tasks:** 
-    *   Initialize and manage the camera stream via `app.py`[cite: 1].
-    *   Normalize incoming image data to the required input size for the model[cite: 1].
-*   **Dependencies:** OpenCV, `app.py`[cite: 1].
+- SOLID, KISS, YAGNI
+- Security by default: least privilege access to local hardware (camera feeds).
+- Testability: modular boundaries, deterministic components, fast tests first (via `pytest`).
+- Clarity: idiomatic Python naming (PEP 8), minimal non‑obvious comments only.
 
-## 2. Landmark Detection Agent (LDA)
-The **LDA** is a specialized spatial analyzer[cite: 1]. It focuses on identifying specific structural points within an image, such as hand joints, before high-level recognition occurs[cite: 1].
+## Expectations for Agents/Contributors
 
-*   **Primary Tasks:** 
-    *   Process frames using the `hand_landmarker.task` protocol[cite: 1].
-    *   Map geometric coordinates for skeletal tracking[cite: 1].
-*   **Assets Utilized:** `hand_landmarker.task`[cite: 1].
+- Skim existing documentation for architecture context before coding.
+- Drive all planning via GitHub Issues (no in‑repo trackers).
+- Keep changes small and focused; propose ADRs for deviations.
+- Add/Update tests for essential behaviors you change or add (e.g., in `.github/test/test_app.py`).
+- For each new feature, add both unit and integration tests when feasible. Integration tests are as important as unit tests and should exercise end-to-end behavior without relying on brittle environment assumptions.
+- Structured logging only; avoid standard `print()` statements in production code.
 
-## 3. The "Monkey" Inference Agent (MIA)
-The **MIA** is the decision-making core[cite: 1]. It interprets the processed spatial data and attempts to classify the content based on pre-trained logic[cite: 1].
+## Session Handoff Protocol (GitHub Issues)
 
-*   **Operational States:**
-    *   **Knowing State:** Activated when a positive identification is made with high confidence[cite: 1]. Represented by `monkeyknow.png`[cite: 1].
-    *   **Thinking State:** Activated during active inference or when data is ambiguous[cite: 1]. Represented by `monkeythink.png`[cite: 1].
-*   **Primary Tasks:** 
-    *   Execute model inference[cite: 1].
-    *   Trigger state-based visual feedback[cite: 1].
+- Start: pick a ready P0 issue, self‑assign, post a “Session Start” plan.
+- During: post concise updates at milestones; adjust labels as needed.
+- End: post “What landed” + “Next steps” and update labels/boards.
+- If behavior/architecture changed, update documentation in the same commit.
 
-## 4. Interaction & Feedback Agent (IFA)
-The **IFA** manages the user-facing output, translating the internal state of the MIA into a visual display for the end user[cite: 1].
+### Task Tooling (GitHub)
 
-*   **Primary Tasks:** 
-    *   Overlay detection results onto the camera feed[cite: 1].
-    *   Toggle between "Think" and "Know" visual assets in the UI[cite: 1].
-*   **Dependencies:** Flask/Web Framework logic in `app.py`[cite: 1].
+- Windows PowerShell (preferred on Windows):
+  - Pick a ready P0 task and mark it in‑progress: `pwsh -f tools/agents/session-start.ps1 [-AssignSelf]`
+  - Update status/comment: `pwsh -f tools/agents/session-update.ps1 -Issue <#> -Status <ready|in-progress|blocked|done> [-WhatFile md] [-NextFile md] [-Close] [-AssignSelf]`
+  - Quickly show the top ready P0: `pwsh -f tools/agents/pick-task.ps1`
 
----
+- Bash (legacy WSL2 tooling still available):
+  - `bash tools/agents/session-start.sh`
+  - `bash tools/agents/session-update.sh --issue <#> --status <...>`
+  - `bash tools/agents/pick-task.sh`
 
-## Agent Workflow Pipeline
+- Note: If CRLF line-endings cause issues, prefer the PowerShell versions on Windows.
+  All tools read `GITHUB_TOKEN` (or `tools/agents/.env`, or `$HOME/.config/XXXX/agent.env`, or a local token file). On Windows, the scripts also probe `F:\WIN_TOKEN.txt`.
 
-1.  **Vision Perception Agent** captures a raw frame[cite: 1].
-2.  **Landmark Detection Agent** extracts spatial features (e.g., hand positions)[cite: 1].
-3.  **Monkey Inference Agent** enters **Thinking** state (`monkeythink.png`) while calculating[cite: 1].
-4.  **Monkey Inference Agent** reaches a conclusion and enters **Knowing** state (`monkeyknow.png`)[cite: 1].
-5.  **Interaction & Feedback Agent** renders the final result to the user interface[cite: 1].
+## Code Organization
+
+Solution layout:
+
+- `.github/` — Contains CI/CD GitHub Actions workflows (`main.yml`) and tests (`test_app.py`).
+- `Monkey/` — Visual interface assets mapping to inference states (`monkeyknow.png`, `monkeythink.png`).
+- `app.py` — Main entry point containing camera initialization, UI routing, and MediaPipe bindings.
+- `hand_landmarker.task` — Pre-trained MediaPipe ML model asset.
+
+### File Layout Rules (Vertical Slice)
+
+- One class/functional module per file.
+- Vertical slices first: organize code by the architectural pipeline components (Agents):
+  - **Vision Perception Agent (VPA):** Handles hardware interfacing and frame normalization.
+  - **Landmark Detection Agent (LDA):** Manages spatial tracking using `hand_landmarker.task`.
+  - **Monkey Inference Agent (MIA):** Executes gesture logic and determines "Thinking" vs "Knowing" states.
+  - **Interaction & Feedback Agent (IFA):** Manages OpenCV visual rendering and overlays.
+- Avoid maintaining monolithic scripts. Aim to abstract the aforementioned agents from `app.py` into distinct modular files.
+
+## Workflow & Quality
+
+- Feature toggles/configuration are mandatory for runtime‑conditional behavior.
+- Follow Python conventions; keep functions single‑purpose.
+- Error handling: Use `try/except` blocks; return typed results where possible; log structured context; never swallow exceptions.
+- Source control: push cohesive changes to master after green build/tests.
+- Keep the repo clean: do not commit generated artifacts or logs. `.gitignore` must exclude `__pycache__/`, `*.pyc`, `logs/`, and environment files.
+- **CRITICAL RESTRICTION:** Under no circumstances should `agent.md` or `AGENTS.md` be committed or pushed to the public GitHub repository. Ensure this file remains explicitly restricted to the local environment.
+
+### Roadmap & Priorities
+
+- **P0:** Stabilize the core OpenCV stream and MediaPipe hand/facial tracking loop.
+- **P1:** Refactor the existing logic in `app.py` into the distinct VPA, LDA, MIA, and IFA class abstractions for better testability.
+- **P2:** Expand MIA's inference capabilities to recognize more complex multi-hand gestures beyond "index near mouth" and "index up".
+- **P3:** Increase coverage in `.github/test/` to include mock camera feeds for isolated CI tests.
+
+## Coding Standards
+
+- Python 3.x enabled; strict type hinting is preferred.
+- OpenCV and MediaPipe tasks must release resources cleanly (e.g., `cap.release()`, `hand_tracker.close()`, and `cv2.destroyAllWindows()`).
+- No dead code: remove unused fields/methods/imports and scaffolding when no longer used.
+- Naming: `snake_case` for variables, locals, and functions. `PascalCase` for classes.
+- Logging: structured using Python's standard `logging` module with appropriate log levels; no raw `print()` statements in production code.
+
+## Documentation Rules
+
+- Central doc is the source of truth. Keep it current when architecture shifts.
+- All task/progress tracking in GitHub Issues.
+
+## Ambiguity
+
+- Prefer the simplest design that satisfies current requirements.
+- If multiple options exist, document a brief rationale and link architectural docs.
+- User instructions take precedence over the central doc.
