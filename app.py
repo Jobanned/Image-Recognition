@@ -1,16 +1,22 @@
+import argparse
+import base64
+import json
+import logging
 import os
-
-os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '2')
-os.environ.setdefault('GLOG_minloglevel', '2')
-os.environ.setdefault('ABSL_MIN_LOG_LEVEL', '2')
+import runpy
+import threading
+import webbrowser
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 import cv2
 import numpy as np
-
 from mediapipe.tasks.python.core.base_options import BaseOptions
 from mediapipe.tasks.python.vision import hand_landmarker
 from mediapipe.tasks.python.vision.core.image import Image, ImageFormat
 from mediapipe.tasks.python.vision.core.vision_task_running_mode import VisionTaskRunningMode
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
 
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),
@@ -21,131 +27,202 @@ HAND_CONNECTIONS = [
     (0, 17),
 ]
 
-# 1. Set up the hand tracker
-model_path = os.path.join(os.path.dirname(__file__), 'hand_landmarker.task')
-if not os.path.exists(model_path):
-    print("ERROR: Can't find hand_landmarker.task in the project folder.")
-    exit()
 
-hand_tracker = hand_landmarker.HandLandmarker.create_from_options(
-    hand_landmarker.HandLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=model_path),
-        running_mode=VisionTaskRunningMode.VIDEO,
-        num_hands=2,
-        min_hand_detection_confidence=0.7,
-        min_hand_presence_confidence=0.7,
-        min_tracking_confidence=0.7,
-    )
-)
+class InferenceEngine:
+    def __init__(self, project_root: str) -> None:
+        model_path = os.path.join(project_root, 'hand_landmarker.task')
+        if not os.path.exists(model_path):
+            raise FileNotFoundError('hand_landmarker.task not found in project root')
 
-# 2. Load the images you want to switch between
-image_dir = os.path.join(os.path.dirname(__file__), 'Monkey')
-open_palm_image = cv2.imread(os.path.join(image_dir, 'monkeyknow.png'))
-closed_fist_image = cv2.imread(os.path.join(image_dir, 'monkeythink.png'))
+        self.hand_tracker = hand_landmarker.HandLandmarker.create_from_options(
+            hand_landmarker.HandLandmarkerOptions(
+                base_options=BaseOptions(model_asset_path=model_path),
+                running_mode=VisionTaskRunningMode.VIDEO,
+                num_hands=2,
+                min_hand_detection_confidence=0.7,
+                min_hand_presence_confidence=0.7,
+                min_tracking_confidence=0.7,
+            )
+        )
+        self.face_detector = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        )
+        self.timestamp_ms = 0
+        self._lock = threading.Lock()
 
-# Check if the images loaded correctly
-if open_palm_image is None or closed_fist_image is None:
-    print("ERROR: I can't find one of the Monkey images. Check the file names in the Monkey folder.")
-    exit()
+    def analyze_frame(self, frame_bgr: np.ndarray) -> dict:
+        frame = cv2.flip(frame_bgr, 1)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-# Make both images the same size so they swap cleanly
-display_size = (open_palm_image.shape[1], open_palm_image.shape[0])
-open_palm_image = cv2.resize(open_palm_image, display_size)
-closed_fist_image = cv2.resize(closed_fist_image, display_size)
+        with self._lock:
+            mp_image = Image(image_format=ImageFormat.SRGB, data=frame_rgb)
+            results = self.hand_tracker.detect_for_video(mp_image, self.timestamp_ms)
+            self.timestamp_ms += 33
 
-# Create a solid black screen of the same size
-blank_image = np.zeros_like(open_palm_image)
+        show_know = False
+        show_think = False
+        hands_payload = []
 
-# 3. Turn on the webcam
-cap = cv2.VideoCapture(0)
-print("Camera is on! Put your index finger near your mouth for THINK, or point your index finger up for KNOW. Press 'q' to quit.")
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = self.face_detector.detectMultiScale(
+            gray,
+            scaleFactor=1.2,
+            minNeighbors=5,
+            minSize=(80, 80),
+        )
 
-face_detector = cv2.CascadeClassifier(
-    cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-)
+        mouth_center = None
+        mouth_radius = None
+        if len(faces) > 0:
+            x, y, w, h = faces[0]
+            mouth_center = (int(x + 0.5 * w), int(y + 0.72 * h))
+            mouth_radius = int(0.15 * (w + h))
 
-timestamp_ms = 0
+        if results.hand_landmarks:
+            for hand_landmarks in results.hand_landmarks:
+                points = []
+                frame_height, frame_width, _ = frame.shape
+                for landmark in hand_landmarks:
+                    x = int(landmark.x * frame_width)
+                    y = int(landmark.y * frame_height)
+                    points.append((x, y))
 
-while True:
-    success, frame = cap.read()
-    if not success:
-        continue
+                hands_payload.append(
+                    [{'x': float(lm.x), 'y': float(lm.y)} for lm in hand_landmarks]
+                )
 
-    # Mirror the camera so it acts like a mirror
-    frame = cv2.flip(frame, 1)
-    
-    # MediaPipe needs colors in a specific format (RGB)
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    
-    # Look for hands in the camera frame
-    mp_image = Image(image_format=ImageFormat.SRGB, data=frame_rgb)
-    results = hand_tracker.detect_for_video(mp_image, timestamp_ms)
-    timestamp_ms += 33
+                if mouth_center is not None and mouth_radius is not None:
+                    index_tip = points[8]
+                    distance_to_mouth = np.hypot(
+                        index_tip[0] - mouth_center[0],
+                        index_tip[1] - mouth_center[1],
+                    )
+                    if distance_to_mouth <= mouth_radius:
+                        show_think = True
 
-    show_know = False
-    show_think = False
+                index_up = hand_landmarks[8].y < hand_landmarks[6].y < hand_landmarks[5].y
+                middle_down = hand_landmarks[12].y > hand_landmarks[10].y
+                ring_down = hand_landmarks[16].y > hand_landmarks[14].y
+                pinky_down = hand_landmarks[20].y > hand_landmarks[18].y
 
-    # Detect face so we can estimate mouth position.
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = face_detector.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(80, 80))
+                if index_up and middle_down and ring_down and pinky_down:
+                    show_know = True
 
-    mouth_center = None
-    mouth_radius = None
-    if len(faces) > 0:
-        x, y, w, h = faces[0]
-        face_center = (int(x + 0.5 * w), int(y + 0.5 * h))
-        face_radius = int(0.55 * max(w, h))
-        mouth_center = (int(x + 0.5 * w), int(y + 0.72 * h))
-        mouth_radius = int(0.15 * (w + h))
-        cv2.circle(frame, face_center, face_radius, (0, 255, 255), 2)
+        if show_think:
+            state = 'THINK'
+        elif show_know:
+            state = 'KNOW'
+        else:
+            state = 'IDLE'
 
-    # 4. Check the fingers if a hand is on screen
-    if results.hand_landmarks:
-        for hand_landmarks in results.hand_landmarks:
-            # Draw landmarks and finger/hand lines on the webcam frame.
-            points = []
-            frame_height, frame_width, _ = frame.shape
-            for landmark in hand_landmarks:
-                x = int(landmark.x * frame_width)
-                y = int(landmark.y * frame_height)
-                points.append((x, y))
-                cv2.circle(frame, (x, y), 4, (0, 255, 0), -1)
+        return {
+            'state': state,
+            'handsDetected': len(results.hand_landmarks) if results.hand_landmarks else 0,
+            'faceDetected': len(faces) > 0,
+            'handLandmarks': hands_payload,
+            'handConnections': HAND_CONNECTIONS,
+        }
 
-            for start_index, end_index in HAND_CONNECTIONS:
-                cv2.line(frame, points[start_index], points[end_index], (255, 0, 0), 2)
+    def close(self) -> None:
+        self.hand_tracker.close()
 
-            # Index fingertip near mouth -> THINK image.
-            index_tip = points[8]
-            if mouth_center is not None and mouth_radius is not None:
-                distance_to_mouth = np.hypot(index_tip[0] - mouth_center[0], index_tip[1] - mouth_center[1])
-                if distance_to_mouth <= mouth_radius:
-                    show_think = True
 
-            # Index up (other fingers down) -> KNOW image.
-            index_up = hand_landmarks[8].y < hand_landmarks[6].y < hand_landmarks[5].y
-            middle_down = hand_landmarks[12].y > hand_landmarks[10].y
-            ring_down = hand_landmarks[16].y > hand_landmarks[14].y
-            pinky_down = hand_landmarks[20].y > hand_landmarks[18].y
+INFERENCE_ENGINE: InferenceEngine | None = None
 
-            if index_up and middle_down and ring_down and pinky_down:
-                show_know = True
 
-    # 5. Show a different image depending on the gesture
-    if show_think:
-        cv2.imshow('Magic Window', closed_fist_image)
-    elif show_know:
-        cv2.imshow('Magic Window', open_palm_image)
-    else:
-        cv2.imshow('Magic Window', blank_image)
+class ProjectRootHandler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        super().__init__(*args, directory=project_root, **kwargs)
 
-    # Show what the webcam sees
-    cv2.imshow('Webcam View', frame)
+    def _send_json(self, status_code: int, payload: dict) -> None:
+        body = json.dumps(payload).encode('utf-8')
+        self.send_response(status_code)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-    # 6. How to quit the program
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+    def do_POST(self) -> None:  # noqa: N802
+        if self.path != '/api/analyze':
+            self._send_json(404, {'error': 'Not found'})
+            return
 
-# Turn off the camera and close windows when done
-hand_tracker.close()
-cap.release()
-cv2.destroyAllWindows()
+        if INFERENCE_ENGINE is None:
+            self._send_json(503, {'error': 'Inference engine unavailable'})
+            return
+
+        content_length = int(self.headers.get('Content-Length', '0'))
+        if content_length <= 0:
+            self._send_json(400, {'error': 'Empty body'})
+            return
+
+        raw_body = self.rfile.read(content_length)
+
+        try:
+            payload = json.loads(raw_body.decode('utf-8'))
+            image_data = payload.get('image', '')
+            if ',' in image_data:
+                image_data = image_data.split(',', 1)[1]
+
+            encoded = base64.b64decode(image_data)
+            np_buffer = np.frombuffer(encoded, dtype=np.uint8)
+            frame = cv2.imdecode(np_buffer, cv2.IMREAD_COLOR)
+            if frame is None:
+                raise ValueError('Invalid image')
+
+            result = INFERENCE_ENGINE.analyze_frame(frame)
+            self._send_json(200, result)
+        except Exception as exc:  # broad catch to avoid killing server on malformed requests
+            logger.exception('Failed to analyze frame: %s', exc)
+            self._send_json(400, {'error': 'Invalid request payload'})
+
+
+def run_web_mode(host: str, port: int, open_browser: bool) -> None:
+    global INFERENCE_ENGINE
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    INFERENCE_ENGINE = InferenceEngine(project_root)
+
+    server = ThreadingHTTPServer((host, port), ProjectRootHandler)
+    url = f"http://{host}:{port}/index.html"
+
+    logger.info("Serving browser app at %s", url)
+    if open_browser:
+        webbrowser.open(url)
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logger.info("Shutting down web server")
+    finally:
+        server.server_close()
+        if INFERENCE_ENGINE is not None:
+            INFERENCE_ENGINE.close()
+
+
+def run_desktop_mode() -> None:
+    desktop_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'desktop_app.py')
+    runpy.run_path(desktop_script, run_name='__main__')
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description='BrainRot Tracker launcher')
+    parser.add_argument('--mode', choices=['web', 'desktop'], default='web', help='Run browser or desktop mode')
+    parser.add_argument('--host', default='127.0.0.1', help='Host for web mode')
+    parser.add_argument('--port', type=int, default=8000, help='Port for web mode')
+    parser.add_argument('--no-browser', action='store_true', help='Do not auto-open browser in web mode')
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    if args.mode == 'desktop':
+        run_desktop_mode()
+        return
+
+    run_web_mode(host=args.host, port=args.port, open_browser=not args.no_browser)
+
+
+if __name__ == '__main__':
+    main()
