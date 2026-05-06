@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width,initial-scale=1" />
+		<title>BrainRot Tracker</title>
+		<link rel="stylesheet" href="styles.css">
+	</head>
+	<body>
+		<div class="shell">
+			<!-- <header class="topbar">
+				<div class="topbar-center">BrainRot Tracker</div>
+			</header> -->
+
+			<main class="container">
+				<section class="hero card">
+					<h1>Smile to the Camera!</h1>
+				</section>
+
+				<section class="layout">
+					<div class="camera-card card">
+						<div class="panel-title-row">
+							<div class="panel-title">Live Camera Feed</div>
+							<div class="status-chip" id="inferenceState">IDLE</div>
+						</div>
+						<div class="preview" id="preview">
+							<video id="camera" class="camera-feed" autoplay playsinline></video>
+							<canvas id="overlay" class="overlay"></canvas>
+							<div class="placeholder">Camera preview will appear here.</div>
+						</div>
+						<div class="meta" id="inferenceMeta">Waiting for camera...</div>
+						<div class="controls">
+							<button class="btn primary" id="startBtn">Start Camera</button>
+							<button class="btn" id="stopBtn">Stop</button>
+						</div>
+					</div>
+
+					<aside class="side">
+						<div class="card">
+							<div class="panel-title">Recognized Image</div>
+							<div class="recognized-wrap">
+								<img id="recognizedImage" alt="Recognized monkey state" />
+							</div>
+							<div class="meta" id="recognizedLabel">No gesture recognized yet.</div>
+						</div>
+						<div class="card">
+							<div class="panel-title">Leaderboard</div>
+							<div class="meta">Leaderboard soon here!</div>
+						</div>
+					</aside>
+				</section>
+			</main>
+		</div>
+		<script>
+			(function(){
+				const startBtn = document.getElementById('startBtn');
+				const stopBtn = document.getElementById('stopBtn');
+				const preview = document.getElementById('preview');
+				const camera = document.getElementById('camera');
+				const overlay = document.getElementById('overlay');
+				const overlayCtx = overlay.getContext('2d');
+				const inferenceState = document.getElementById('inferenceState');
+				const inferenceMeta = document.getElementById('inferenceMeta');
+				const recognizedImage = document.getElementById('recognizedImage');
+				const recognizedLabel = document.getElementById('recognizedLabel');
+				const captureCanvas = document.createElement('canvas');
+				const HAND_CONNECTIONS = [
+					[0,1],[1,2],[2,3],[3,4],
+					[0,5],[5,6],[6,7],[7,8],
+					[5,9],[9,10],[10,11],[11,12],
+					[9,13],[13,14],[14,15],[15,16],
+					[13,17],[17,18],[18,19],[19,20],[0,17]
+				];
+				const STATE_IMAGES = {
+					THINK: 'Monkey/monkeythink.png',
+					KNOW: 'Monkey/monkeyknow.png'
+				};
+				let stream = null;
+				let analyzeLoopActive = false;
+				let requestInFlight = false;
+
+				function showPlaceholder(show){
+					const ph = preview.querySelector('.placeholder');
+					if(ph) ph.style.display = show ? 'block' : 'none';
+				}
+
+				function updatePreviewSize(){
+					if(camera.videoWidth > 0 && camera.videoHeight > 0){
+						overlay.width = camera.videoWidth;
+						overlay.height = camera.videoHeight;
+					}
+				}
+
+				function clearOverlay(){
+					overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+				}
+
+				function drawHands(handLandmarks){
+					clearOverlay();
+					if(!Array.isArray(handLandmarks) || handLandmarks.length === 0){
+						return;
+					}
+
+					overlayCtx.lineWidth = 2;
+					overlayCtx.strokeStyle = '#39d1ff';
+					overlayCtx.fillStyle = '#a0f2ff';
+
+					for(const hand of handLandmarks){
+						for(const [start, end] of HAND_CONNECTIONS){
+							const a = hand[start];
+							const b = hand[end];
+							if(!a || !b) continue;
+							overlayCtx.beginPath();
+							overlayCtx.moveTo(a.x * overlay.width, a.y * overlay.height);
+							overlayCtx.lineTo(b.x * overlay.width, b.y * overlay.height);
+							overlayCtx.stroke();
+						}
+
+						for(const point of hand){
+							overlayCtx.beginPath();
+							overlayCtx.arc(point.x * overlay.width, point.y * overlay.height, 3.2, 0, Math.PI * 2);
+							overlayCtx.fill();
+						}
+					}
+				}
+
+				function applyState(state){
+					inferenceState.textContent = state;
+					if(state === 'THINK' || state === 'KNOW'){
+						recognizedImage.src = STATE_IMAGES[state];
+						recognizedImage.style.display = 'block';
+						recognizedLabel.textContent = `Recognized: ${state}`;
+					}else{
+						recognizedImage.removeAttribute('src');
+						recognizedImage.style.display = 'none';
+						recognizedLabel.textContent = 'No gesture recognized yet.';
+					}
+				}
+
+				async function startCamera(){
+					try{
+						stream = await navigator.mediaDevices.getUserMedia({video:true});
+						camera.srcObject = stream;
+						camera.onloadedmetadata = updatePreviewSize;
+						showPlaceholder(false);
+						startBtn.disabled = true;
+						stopBtn.disabled = false;
+						inferenceMeta.textContent = 'Analyzing...';
+						analyzeLoopActive = true;
+						void analyzeLoop();
+					}catch(err){
+						alert('Unable to access camera: ' + (err && err.message ? err.message : err));
+					}
+				}
+
+				async function analyzeLoop(){
+					while(analyzeLoopActive){
+						await analyzeFrame();
+						await new Promise(resolve => requestAnimationFrame(resolve));
+					}
+				}
+
+				async function analyzeFrame(){
+					if(!stream || requestInFlight || camera.readyState < 2){
+						return;
+					}
+
+					requestInFlight = true;
+					try{
+						const width = 256;
+						const ratio = camera.videoHeight > 0 ? camera.videoHeight / camera.videoWidth : 0.75;
+						const height = Math.max(180, Math.floor(width * ratio));
+
+						captureCanvas.width = width;
+						captureCanvas.height = height;
+						const ctx = captureCanvas.getContext('2d');
+						ctx.drawImage(camera, 0, 0, width, height);
+
+						const image = captureCanvas.toDataURL('image/jpeg', 0.6);
+						const response = await fetch('/api/analyze', {
+							method: 'POST',
+							headers: {'Content-Type': 'application/json'},
+							body: JSON.stringify({image})
+						});
+
+						if(!response.ok){
+							throw new Error('Python API not reachable');
+						}
+
+						const data = await response.json();
+						updatePreviewSize();
+						applyState(data.state || 'IDLE');
+						drawHands(data.handLandmarks || []);
+						inferenceMeta.textContent = `Hands: ${data.handsDetected ?? 0} | Face: ${data.faceDetected ? 'yes' : 'no'}`;
+					}catch(err){
+						inferenceState.textContent = 'OFFLINE';
+						clearOverlay();
+						inferenceMeta.textContent = err && err.message ? err.message : 'Inference unavailable';
+					}finally{
+						requestInFlight = false;
+					}
+				}
+
+				function stopCamera(){
+					analyzeLoopActive = false;
+
+					if(stream){
+						stream.getTracks().forEach(t => t.stop());
+						stream = null;
+					}
+					camera.srcObject = null;
+					clearOverlay();
+					showPlaceholder(true);
+					startBtn.disabled = false;
+					stopBtn.disabled = true;
+					applyState('IDLE');
+					inferenceMeta.textContent = 'Waiting for camera...';
+				}
+
+				startBtn.addEventListener('click', startCamera);
+				stopBtn.addEventListener('click', stopCamera);
+				stopBtn.disabled = true;
+				applyState('IDLE');
+			})();
+		</script>
+	</body>
+</html>
+
