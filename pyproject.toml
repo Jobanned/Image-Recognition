@@ -13,7 +13,7 @@ dependencies = [
     "pydantic==2.5.0",
     "mediapipe==0.10.35",
     "opencv-python-headless==4.8.1.78",
-    "numpy==1.24.3",
+    "numpy<2.0",
     "pillow==10.1.0",
     "python-multipart==0.0.6",
     "slowapi==0.1.9",

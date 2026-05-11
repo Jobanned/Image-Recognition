@@ -57,7 +57,7 @@ class FrameAnalysisResponse(BaseModel):
     handConnections: list
 
 
-@app.get('/health')
+@app.get('/api/health')
 async def health_check():
     """Health check endpoint for monitoring."""
     return JSONResponse({'status': 'ok'})
@@ -107,12 +107,7 @@ async def analyze_frame(request: FrameAnalysisRequest):
         raise HTTPException(status_code=500, detail="Frame analysis failed")
 
 
-# Mount static files from parent directory
-# This serves index.html, styles.css, and Monkey/ folder
-try:
-    static_dir = Path(__file__).parent.parent
-    app.mount('/', StaticFiles(directory=static_dir, html=True), name='static')
-except Exception as e:
-    logger.warning(f'Could not mount static files: {e}')
+# Static files are served by Vercel directly from the root directory.
+# This file only handles API requests under /api/*.
 
 

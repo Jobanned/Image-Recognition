@@ -52,8 +52,8 @@ agent.md
 .instructions.md
 
 # Large model files (use releases instead)
-*.task
-hand_landmarker.task
+# *.task
+# hand_landmarker.task
 
 # Local app (keep desktop version private)
 desktop_app.py
