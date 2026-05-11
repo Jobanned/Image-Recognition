@@ -1,6 +1,17 @@
 {
-    "rewrites": [
-        { "source": "/api/(.*)", "destination": "/api/index.py" },
-        { "source": "/", "destination": "/index.html" }
+    "version": 2,
+    "builds": [
+        { "src": "api/index.py", "use": "@vercel/python" },
+        { "src": "index.html", "use": "@vercel/static" },
+        { "src": "styles.css", "use": "@vercel/static" },
+        { "src": "Monkey/**", "use": "@vercel/static" },
+        { "src": "hand_landmarker.task", "use": "@vercel/static" }
+    ],
+    "routes": [
+        { "src": "/api/(.*)", "dest": "/api/index.py" },
+        { "src": "/(.*\\.(png|jpg|jpeg|svg|ico|css|js|task))", "dest": "/$1" },
+        { "src": "/Monkey/(.*)", "dest": "/Monkey/$1" },
+        { "src": "/", "dest": "/index.html" },
+        { "src": "/(.*)", "dest": "/index.html" }
     ]
 }
