@@ -6,14 +6,18 @@ build-backend = "setuptools.build_meta"
 name = "brainrot-tracker"
 version = "1.0.0"
 description = "Brain Rot Tracker - Gesture recognition with hand tracking"
-requires-python = ">=3.9"
+requires-python = ">=3.10,<3.13"
 dependencies = [
     "fastapi==0.104.1",
     "uvicorn==0.24.0",
     "pydantic==2.5.0",
-    "mediapipe==0.10.7",
+    "mediapipe==0.10.35",
     "opencv-python-headless==4.8.1.78",
-    "numpy==1.24.3",
+    "numpy<2.0",
     "pillow==10.1.0",
     "python-multipart==0.0.6",
+    "slowapi==0.1.9",
 ]
+
+[tool.setuptools]
+packages = ["api"]
