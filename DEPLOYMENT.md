@@ -6,7 +6,7 @@ A real-time gesture recognition application using MediaPipe hand tracking and Op
 
 - **Backend**: FastAPI + MediaPipe for hand tracking inference
 - **Frontend**: HTML5 Canvas + WebRTC for camera streaming
-- **Deployment**: Vercel (serverless)
+- **Deployment**: Vercel Python Functions (serverless)
 
 ## Local Development
 
@@ -47,10 +47,12 @@ A real-time gesture recognition application using MediaPipe hand tracking and Op
    - Select your GitHub repository
    - Vercel auto-detects the Python framework
 
-2. **Configure environment** (if needed):
+2. **Configure the project**:
    - Root directory: `.` (default)
-   - Build command: `pip install -r requirements.txt`
-   - Output directory: (leave empty for API-only)
+   - Framework preset: `Other`
+   - Leave the build and output-directory fields empty. Vercel discovers
+     `api/index.py` as the FastAPI function and installs dependencies from
+     `requirements.txt`.
 
 3. **Deploy**:
    - Click "Deploy"
@@ -60,7 +62,8 @@ A real-time gesture recognition application using MediaPipe hand tracking and Op
 
 - **Cold start**: First request may take 5-10 seconds (model loading)
 - **Timeouts**: Free tier has 10-second limit; Pro tier has higher limits
-- **File size**: MediaPipe model (~200MB) must be included in deployment
+- **File size**: The MediaPipe model must remain in the repository. It is bundled
+  with the Python function; static frontend assets are excluded from that bundle.
 - **Browser camera**: Uses WebRTC - requires HTTPS (Vercel provides this)
 
 ## API Endpoints
@@ -89,7 +92,7 @@ Analyzes a single video frame.
 }
 ```
 
-### `GET /health`
+### `GET /api/health`
 
 Health check endpoint.
 
