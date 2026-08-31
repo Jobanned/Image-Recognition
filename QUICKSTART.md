@@ -15,7 +15,7 @@
    ```
 
 3. **Open in browser**:
-   - http://localhost:8000
+   - http://127.0.0.1:8000
    - Click "Start Camera"
    - Grant camera permissions
    - Make gestures to see inference results

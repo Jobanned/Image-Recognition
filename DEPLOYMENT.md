@@ -30,7 +30,8 @@ A real-time gesture recognition application using MediaPipe hand tracking and Op
    uvicorn api.index:app --reload
    ```
 
-3. Open http://localhost:8000 in your browser
+3. Open http://127.0.0.1:8000 in your browser. FastAPI serves the local
+   frontend assets as well as the `/api/*` endpoints.
 
 ## Deployment to Vercel
 
